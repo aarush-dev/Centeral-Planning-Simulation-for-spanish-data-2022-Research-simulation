@@ -23,6 +23,9 @@ JULIA_CORE = Path(__file__).parent / "model_core.jl"
 
 
 def _load_core():
+    # Ensure necessary Julia packages are installed
+    jl.seval('import Pkg; Pkg.add(["PythonCall", "JuMP", "HiGHS"])')
+
     # Only include the file if the Module isn't already defined to avoid constant redefinition errors
     jl.seval(f"""
         if !isdefined(Main, :ModelCore)
