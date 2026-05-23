@@ -6,21 +6,24 @@ Includes diagnostic plots for Alpha Gap, Price Drift, and Iterations.
 """
 
 import os
-# Mitigate segfaults by handling Julia/Python signal collisions
-os.environ["PYTHON_JULIACALL_HANDLE_SIGNALS"] = "yes"
+
+# Fix Kaggle matplotlib error
+os.environ.pop("MPLBACKEND", None)
 
 import json
 import logging
 import time
 import numpy as np
 import matplotlib
-matplotlib.use('Agg') # Use non-interactive backend to prevent thread-safety crashes
+
+matplotlib.use("Agg")  # Use non-interactive backend to prevent thread-safety crashes
 import matplotlib.pyplot as plt
 from pathlib import Path
 from datetime import datetime
 
 import sys
 import os
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Simulation components
@@ -29,6 +32,7 @@ from data.calibration import calibrate
 from engine.simulation import run_simulation, SimulationError
 
 logging.basicConfig(level=logging.WARNING, format="%(message)s")
+
 
 class EnsembleConfig:
     def __init__(self, config_path="Data/config.json"):
@@ -39,7 +43,7 @@ class EnsembleConfig:
                 with open(p, "r") as f:
                     self.config = json.load(f)
                 break
-        
+
         self.defaults = {
             "n_quarters": 20,
             "n_runs": 1000,
@@ -70,12 +74,13 @@ class EnsembleConfig:
             "eta_L": 0.15,
             "max_iter": 2000,
             "cybernetic_k_sigma": 1.0,
-            "sigma_val": 1.0
+            "sigma_val": 1.0,
         }
 
     def get(self, key):
         val = self.config.get(key, self.defaults.get(key))
         return val
+
 
 class TrajectoryCollector:
     def __init__(self, n_runs, n_q):
@@ -87,19 +92,23 @@ class TrajectoryCollector:
         self.cap_slack = np.full((n_runs, n_q), np.nan)
         self.alpha_gap = np.full((n_runs, n_q), np.nan)
         self.price_drift = np.full((n_runs, n_q), np.nan)
-        self.mvps = [] # Flat list for histogram
+        self.mvps = []  # Flat list for histogram
 
     def add_run(self, idx, history):
-        if not isinstance(history, list): return
+        if not isinstance(history, list):
+            return
         self.success_count += 1
         gdp_q1 = history[0]["GDP"]
         for q, h in enumerate(history):
-            self.inflation[idx, q]  = h.get("Inflation", 0.0)
-            self.cap_slack[idx, q]   = (h.get("slack_val_Q1", 0.0) / max(h.get("K_val_Q1", 1.0), 1e-12)) * 100.0
-            self.gdp_level[idx, q]  = (h["GDP"] / gdp_q1) * 100.0
-            self.alpha_gap[idx, q]  = h.get("alpha_gap", 0.0) * 100.0 # to %
-            self.price_drift[idx, q] = h.get("price_drift", 0.0) * 100.0 # to %
+            self.inflation[idx, q] = h.get("Inflation", 0.0)
+            self.cap_slack[idx, q] = (
+                h.get("slack_val_Q1", 0.0) / max(h.get("K_val_Q1", 1.0), 1e-12)
+            ) * 100.0
+            self.gdp_level[idx, q] = (h["GDP"] / gdp_q1) * 100.0
+            self.alpha_gap[idx, q] = h.get("alpha_gap", 0.0) * 100.0  # to %
+            self.price_drift[idx, q] = h.get("price_drift", 0.0) * 100.0  # to %
             self.mvps.append(h.get("mvps", h.get("iterations", 0) * 2))
+
 
 class ProfessionalPlotter:
     def __init__(self, out_dir):
@@ -108,15 +117,16 @@ class ProfessionalPlotter:
 
     def plot_fan(self, data, title, ylabel, filename):
         valid = data[~np.isnan(data).any(axis=1)]
-        if valid.size == 0: return
+        if valid.size == 0:
+            return
         x = np.arange(1, valid.shape[1] + 1)
         pcts = [np.percentile(valid, p, axis=0) for p in [5, 15, 25, 75, 85, 95]]
-        
+
         fig, ax = plt.subplots(figsize=(10, 6))
-        ax.fill_between(x, pcts[0], pcts[5], color="#d5e2f0", alpha=0.9, label='90% CI')
-        ax.fill_between(x, pcts[1], pcts[4], color="#85a4cd", alpha=0.9, label='70% CI')
-        ax.fill_between(x, pcts[2], pcts[3], color="#0b3060", alpha=0.9, label='50% CI')
-        
+        ax.fill_between(x, pcts[0], pcts[5], color="#d5e2f0", alpha=0.9, label="90% CI")
+        ax.fill_between(x, pcts[1], pcts[4], color="#85a4cd", alpha=0.9, label="70% CI")
+        ax.fill_between(x, pcts[2], pcts[3], color="#0b3060", alpha=0.9, label="50% CI")
+
         ax.set_title(f"Monte Carlo: {title}", fontweight="bold", fontsize=14)
         ax.set_ylabel(ylabel)
         ax.set_xlabel("Quarter")
@@ -128,9 +138,10 @@ class ProfessionalPlotter:
         plt.close()
 
     def plot_hist(self, data, title, xlabel, filename):
-        if not data: return
+        if not data:
+            return
         fig, ax = plt.subplots(figsize=(8, 5))
-        ax.hist(data, bins=30, color="#0b3060", alpha=0.7, edgecolor='white')
+        ax.hist(data, bins=30, color="#0b3060", alpha=0.7, edgecolor="white")
         ax.set_title(f"Monte Carlo: {title}", fontweight="bold")
         ax.set_xlabel(xlabel)
         ax.set_ylabel("Frequency (Quarters)")
@@ -139,61 +150,143 @@ class ProfessionalPlotter:
         plt.savefig(self.out_dir / f"hist_{filename}.pdf")
         plt.close()
 
+
+import concurrent.futures
+from core.torch_core import set_device
+import torch
+
+
+def _worker_run(i, data, config_params, n_q):
+    try:
+        run_start = time.time()
+        # Allocate run to alternating GPU if available
+        if torch.cuda.device_count() > 1:
+            set_device(f"cuda:{i % torch.cuda.device_count()}")
+        elif torch.cuda.is_available():
+            set_device("cuda:0")
+
+        state = calibrate(data, **config_params)
+        state.rng = np.random.default_rng(1000 + i)
+        state.slim_history = True
+
+        state = run_simulation(state, n_quarters=n_q)
+        elapsed = time.time() - run_start
+        return i, state.history, elapsed, None
+    except Exception as e:
+        return i, None, 0.0, str(e)
+
+
 def run_ensemble():
     config_handler = EnsembleConfig()
     n_runs = config_handler.get("n_runs")
-    n_q    = config_handler.get("n_quarters")
-    data   = load_data()
-    
+    n_q = config_handler.get("n_quarters")
+    data = load_data()
+
     import inspect
+
     sig = inspect.signature(calibrate)
-    config_params = {k: config_handler.get(k) for k in sig.parameters.keys() if k != 'data'}
+    config_params = {
+        k: config_handler.get(k) for k in sig.parameters.keys() if k != "data"
+    }
 
     collector = TrajectoryCollector(n_runs, n_q)
-    out_dir = Path(__file__).parents[2] / "Results" / "MonteCarlo" / datetime.now().strftime('%Y%m%d_%H%M%S')
-    out_dir.mkdir(parents=True, exist_ok=True)    
-    print(f"Starting Sequential Monte-Carlo: {n_runs} runs.")
-    print(f"Parameters: { {k:v for k,v in config_params.items() if v is not None} }")
+    out_dir = (
+        Path(__file__).parents[2]
+        / "Results"
+        / "MonteCarlo"
+        / datetime.now().strftime("%Y%m%d_%H%M%S")
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Starting Parallel Monte-Carlo: {n_runs} runs.")
+    print(f"Parameters: { {k: v for k, v in config_params.items() if v is not None} }")
     print(f"Diagnostics: GDP, Inflation, Slack, Alpha Gap, Price Drift, Iterations.")
     print(f"Results will save periodically to {out_dir}\n")
-    
+
     start_time = time.time()
-    for i in range(n_runs):
-        run_start = time.time()
-        try:
-            state = calibrate(data, **config_params)
-            state.rng = np.random.default_rng(1000 + i)
-            state.slim_history = True
-            
-            state = run_simulation(state, n_quarters=n_q)
-            collector.add_run(i, state.history)
-            
-            elapsed = time.time() - run_start
-            if (i + 1) % 5 == 0 or i == 0:
-                print(f"  Run {i+1}/{n_runs} complete ({elapsed:.1f}s/run). Total elapsed: {time.time()-start_time:.0f}s")
-            
-            if (i + 1) % 25 == 0:
+
+    import multiprocessing as mp
+
+    try:
+        mp.set_start_method("spawn")
+    except RuntimeError:
+        pass  # context already set
+
+    completed_runs = 0
+
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=min(4, os.cpu_count() or 4)
+    ) as executor:
+        futures = {
+            executor.submit(_worker_run, i, data, config_params, n_q): i
+            for i in range(n_runs)
+        }
+        for future in concurrent.futures.as_completed(futures):
+            i, history, elapsed, error = future.result()
+            if error:
+                print(f"  Run {i + 1} failed: {error}")
+            else:
+                collector.add_run(i, history)
+
+            completed_runs += 1
+            if completed_runs % 5 == 0 or completed_runs == 1:
+                print(
+                    f"  Run {completed_runs}/{n_runs} complete ({elapsed:.1f}s/run). Total elapsed: {time.time() - start_time:.0f}s"
+                )
+
+            if completed_runs % 25 == 0:
                 print(f"  Updating intermediate plots...")
                 plotter = ProfessionalPlotter(out_dir)
-                plotter.plot_fan(collector.gdp_level, "Real GDP Level", "Index (Q1=100)", "gdp_level")
-                plotter.plot_fan(collector.inflation, "Geomean Inflation", "Rate", "inflation")
-                plotter.plot_fan(collector.cap_slack, "Capital Capacity Slack", "Unused (%)", "capital_slack")
-                plotter.plot_fan(collector.alpha_gap, "Alpha Tracking Error (Gap)", "Error (%)", "alpha_gap")
-                plotter.plot_fan(collector.price_drift, "Price Drift (RMS)", "Drift (%)", "price_drift")
-                plotter.plot_hist(collector.mvps, "Computational Effort", "Matrix-Vector Operations", "mvps")
-
-        except Exception as e:
-            print(f"  Run {i+1} failed: {e}")
+                plotter.plot_fan(
+                    collector.gdp_level, "Real GDP Level", "Index (Q1=100)", "gdp_level"
+                )
+                plotter.plot_fan(
+                    collector.inflation, "Geomean Inflation", "Rate", "inflation"
+                )
+                plotter.plot_fan(
+                    collector.cap_slack,
+                    "Capital Capacity Slack",
+                    "Unused (%)",
+                    "capital_slack",
+                )
+                plotter.plot_fan(
+                    collector.alpha_gap,
+                    "Alpha Tracking Error (Gap)",
+                    "Error (%)",
+                    "alpha_gap",
+                )
+                plotter.plot_fan(
+                    collector.price_drift,
+                    "Price Drift (RMS)",
+                    "Drift (%)",
+                    "price_drift",
+                )
+                plotter.plot_hist(
+                    collector.mvps,
+                    "Computational Effort",
+                    "Matrix-Vector Operations",
+                    "mvps",
+                )
 
     plotter = ProfessionalPlotter(out_dir)
-    plotter.plot_fan(collector.gdp_level, "Real GDP Level", "Index (Q1=100)", "gdp_level")
+    plotter.plot_fan(
+        collector.gdp_level, "Real GDP Level", "Index (Q1=100)", "gdp_level"
+    )
     plotter.plot_fan(collector.inflation, "Geomean Inflation", "Rate", "inflation")
-    plotter.plot_fan(collector.cap_slack, "Capital Capacity Slack", "Unused (%)", "capital_slack")
-    plotter.plot_fan(collector.alpha_gap, "Alpha Tracking Error (Gap)", "Error (%)", "alpha_gap")
-    plotter.plot_fan(collector.price_drift, "Price Drift (RMS)", "Drift (%)", "price_drift")
-    plotter.plot_hist(collector.mvps, "Computational Effort", "Matrix-Vector Operations", "mvps")
-    
+    plotter.plot_fan(
+        collector.cap_slack, "Capital Capacity Slack", "Unused (%)", "capital_slack"
+    )
+    plotter.plot_fan(
+        collector.alpha_gap, "Alpha Tracking Error (Gap)", "Error (%)", "alpha_gap"
+    )
+    plotter.plot_fan(
+        collector.price_drift, "Price Drift (RMS)", "Drift (%)", "price_drift"
+    )
+    plotter.plot_hist(
+        collector.mvps, "Computational Effort", "Matrix-Vector Operations", "mvps"
+    )
+
     print(f"\nMonte-Carlo complete. Success: {collector.success_count}/{n_runs}")
+
 
 if __name__ == "__main__":
     run_ensemble()

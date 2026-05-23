@@ -1,7 +1,12 @@
 import os
 import sys
-# Fix segfaults by handling Julia/Python signal collisions (Must be set BEFORE other imports)
-os.environ["PYTHON_JULIACALL_HANDLE_SIGNALS"] = "yes"
+
+# Fix Kaggle matplotlib error
+os.environ.pop("MPLBACKEND", None)
+
+import matplotlib
+
+matplotlib.use("Agg")
 
 # Add parent directory to Python path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,19 +22,33 @@ logger = logging.getLogger(__name__)
 
 from data.data_loader import load_data, sector_groups, annualise
 from data.calibration import calibrate
-from engine.simulation  import run_simulation
+from engine.simulation import run_simulation
 from analysis.plots import (
-    GROUP_COLORS, qlabels, group_agg, savefig,
-    plot_gdp, plot_aggregate_demand_breakdown,
-    plot_output_consumption, plot_investment,
-    plot_shadow_prices, plot_capital, plot_alpha,
-    plot_alpha_gap, plot_capital_output_ratio,
-    plot_capital_slack, plot_labor_utilization,
-    plot_shadow_price_index, plot_cybernetic_signals,
-    plot_real_income_index, plot_labor_productivity,
-    plot_growth_targets, plot_excess_demand,
-    plot_inflation, plot_investment_gdp_ratio, plot_mvps,
-    plot_firm_income_distribution
+    GROUP_COLORS,
+    qlabels,
+    group_agg,
+    savefig,
+    plot_gdp,
+    plot_aggregate_demand_breakdown,
+    plot_output_consumption,
+    plot_investment,
+    plot_shadow_prices,
+    plot_capital,
+    plot_alpha,
+    plot_alpha_gap,
+    plot_capital_output_ratio,
+    plot_capital_slack,
+    plot_labor_utilization,
+    plot_shadow_price_index,
+    plot_cybernetic_signals,
+    plot_real_income_index,
+    plot_labor_productivity,
+    plot_growth_targets,
+    plot_excess_demand,
+    plot_inflation,
+    plot_investment_gdp_ratio,
+    plot_mvps,
+    plot_firm_income_distribution,
 )
 
 # --- Config ------------------------------------------------------------------
@@ -51,7 +70,7 @@ config = {
     "cybernetic_k_sigma": 1.0,
 }
 
-DATA_DIR    = Path(__file__).parent.parent / "Data"
+DATA_DIR = Path(__file__).parent.parent / "Data"
 CONFIG_PATH = DATA_DIR / "config.json"
 
 if CONFIG_PATH.exists():
@@ -63,9 +82,9 @@ if CONFIG_PATH.exists():
         logger.warning(f"[main] Failed to load config.json: {e}. Using defaults.")
 
 N_QUARTERS = config["n_quarters"]
-DELTA      = config["delta"]
+DELTA = config["delta"]
 
-timestamp   = datetime.now().strftime("%Y%m%d_%H%M%S")
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 RESULTS_DIR = Path(__file__).parent.parent / "Results" / timestamp
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -75,8 +94,9 @@ with open(RESULTS_DIR / "run_config.json", "w") as f:
 
 # --- Main --------------------------------------------------------------------
 
+
 def main():
-    data   = load_data(DATA_DIR)
+    data = load_data(DATA_DIR)
     groups = sector_groups(data["sector_names"])
 
     state = calibrate(
@@ -106,7 +126,7 @@ def main():
         hh_dispersion=config.get("hh_dispersion", 0.05),
         max_price_iter=config.get("max_price_iter", 8),
         n_firms=config.get("n_firms", 250),
-        cybernetic_k_sigma=config.get("cybernetic_k_sigma", 1.0)
+        cybernetic_k_sigma=config.get("cybernetic_k_sigma", 1.0),
     )
     if "rng_seed" in config and config["rng_seed"] is not None:
         state.rng = np.random.default_rng(config["rng_seed"])
@@ -122,48 +142,69 @@ def main():
     logger.info("\nQuarter   GDP (B EUR ann.)  YoY Growth   QoQ Growth")
     logger.info("-" * 55)
     for h in state.history:
-        t   = h["t"]
+        t = h["t"]
         gdp = annualise(h["GDP"]) / 1e9
-        yoy = (gdp / (annualise(state.history[t-5]["GDP"])/1e9) - 1) * 100 if t > 4 else None
-        qoq = (h["GDP"] / (state.history[t-2]["GDP"] + 1e-30) - 1) * 100 if t > 1 else None
-        logger.info(f"Q{t:02d}   {gdp:10.2f}  "
-                    f"{'  ---' if yoy is None else f'{yoy:6.2f}%'}  "
-                    f"{'  ---' if qoq is None else f'{qoq:6.2f}%'}")
+        yoy = (
+            (gdp / (annualise(state.history[t - 5]["GDP"]) / 1e9) - 1) * 100
+            if t > 4
+            else None
+        )
+        qoq = (
+            (h["GDP"] / (state.history[t - 2]["GDP"] + 1e-30) - 1) * 100
+            if t > 1
+            else None
+        )
+        logger.info(
+            f"Q{t:02d}   {gdp:10.2f}  "
+            f"{'  ---' if yoy is None else f'{yoy:6.2f}%'}  "
+            f"{'  ---' if qoq is None else f'{qoq:6.2f}%'}"
+        )
 
     # Plots
-    import matplotlib
-    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    plt.rcParams.update({
-        "font.family":      "serif",
-        "font.serif":       ["Times New Roman", "DejaVu Serif"],
-        "font.size":        11,
-        "axes.titlesize":   12,
-        "axes.labelsize":   11,
-        "axes.linewidth":   1.0,
-        "xtick.labelsize":  9,
-        "ytick.labelsize":  9,
-        "xtick.direction":  "out",
-        "ytick.direction":  "out",
-        "grid.alpha":       0.25,
-        "grid.linestyle":   "--",
-        "lines.linewidth":  2.0,
-        "lines.markersize": 5,
-        "legend.frameon":   False,
-        "legend.fontsize":  9,
-        "figure.dpi":       300,
-        "savefig.dpi":      300,
-        "savefig.bbox":     "tight",
-    })
 
-    r   = RESULTS_DIR
+    plt.rcParams.update(
+        {
+            "font.family": "serif",
+            "font.serif": ["Times New Roman", "DejaVu Serif"],
+            "font.size": 11,
+            "axes.titlesize": 12,
+            "axes.labelsize": 11,
+            "axes.linewidth": 1.0,
+            "xtick.labelsize": 9,
+            "ytick.labelsize": 9,
+            "xtick.direction": "out",
+            "ytick.direction": "out",
+            "grid.alpha": 0.25,
+            "grid.linestyle": "--",
+            "lines.linewidth": 2.0,
+            "lines.markersize": 5,
+            "legend.frameon": False,
+            "legend.fontsize": 9,
+            "figure.dpi": 300,
+            "savefig.dpi": 300,
+            "savefig.bbox": "tight",
+        }
+    )
+
+    r = RESULTS_DIR
     P_0 = state.P_0
 
-    plot_gdp(state.history, r / "01_gdp.png", P_initial=state.pi_0_fixed, A=state.A, real_scale_factor=state.real_scale_factor)
+    plot_gdp(
+        state.history,
+        r / "01_gdp.png",
+        P_initial=state.pi_0_fixed,
+        A=state.A,
+        real_scale_factor=state.real_scale_factor,
+    )
     plot_aggregate_demand_breakdown(state.history, r / "01b_ad_breakdown.png")
-    plot_output_consumption(state.history, groups, r / "02_output_consumption.png", P_0=P_0)
+    plot_output_consumption(
+        state.history, groups, r / "02_output_consumption.png", P_0=P_0
+    )
     plot_investment(state.history, groups, r / "03_investment.png", P_0=P_0)
-    plot_shadow_prices(state.history, data["sector_short"], groups, r / "04_shadow_prices.png")
+    plot_shadow_prices(
+        state.history, data["sector_short"], groups, r / "04_shadow_prices.png"
+    )
     plot_capital(state.history, groups, r / "05_capital.png", P_0=P_0)
     plot_alpha(state.history, r / "06_alpha_learning.png")
     plot_alpha_gap(state.history, r / "07_alpha_error.png")
