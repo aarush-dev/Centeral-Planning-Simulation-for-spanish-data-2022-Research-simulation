@@ -42,7 +42,7 @@ class EnsembleConfig:
         
         self.defaults = {
             "n_quarters": 20,
-            "n_runs": 250,
+            "n_runs": 1000,
             "delta": 0.01,
             "pref_drift_rho": 0.9,
             "pref_drift_sigma": 0.02,

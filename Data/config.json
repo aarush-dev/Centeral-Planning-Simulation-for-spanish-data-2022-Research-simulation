@@ -2,7 +2,7 @@
     "//": "Cybernetic In-Kind Planning Simulation - Configuration",
     "//_Simulation_Scope": "--------------------------------------------------",
     "n_quarters": 20,
-    "n_runs": 250,
+    "n_runs": 1000,
     "rng_seed": null,
     "checkpoint_every": 4,
     "neumann_k": 27,

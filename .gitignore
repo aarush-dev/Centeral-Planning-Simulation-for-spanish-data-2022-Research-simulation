@@ -20,3 +20,6 @@ Thumbs.db
 Scripts/__pycache__/
 
 
+Results/
+.venv/
+uv.lock
